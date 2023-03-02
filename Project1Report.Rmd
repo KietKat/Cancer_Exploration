@@ -1,0 +1,179 @@
+---
+title: "Classification Model for Breast Cancer Diagnosis"
+author: "Kiet Nguyen"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{=html}
+<style type="text/css">
+body p, div, h1, h2, h3, h4, h5 {
+color: black;
+font-family: Modern Computer Roman;
+}
+slides > slide.title-slide hgroup h1 {
+color: #8C1D40; <!--the maroon color-->
+}
+h2 {
+color: #8C1D40; <!-- the maroon color-->
+}
+</style>
+```
+
+## INTRODUCTION OF THE PROJECT
+* This project investigates the Breast Cancer data frame at Wisconsin.
+* The data frame has 32 columns, with 31 attributes of a tumor and 1 diagnosis of Malignant **(M)** or Benign **(B)**. 
+* The goal of this project is to:
+1. Build a **Classification Model** to classifying if a tumor is Malignant or Benign, based on their attribute.
+2. Determine which attribute play the most important roles in diagnosing cancer. 
+3. Investigate **TWO** most important attributes and their correlation to each other and the diagnosis. 
+* We will be using **80-20 Train-Test Split**, along with **Polynomial Kernels** training method  
+
+## LOADING NECESSARY LIBRARY
+The four packages we need for this projects are **tidyverse**, **dplyr**, **plotly** and **caret**. The classification model is created by mainly using the **caret** package.
+```{r loading library, message = FALSE}
+
+library(tidyverse) #used for 2D plot
+library(dplyr)
+library(caret) # Classification and Regression Training
+library(plotly) #used for 3D plot
+```
+
+## LOADING AND CLEANING DATA
+The first and foremost step is loading the data, We are using the **Breast Cancer Wisconsin (Diagnostic) Data Set** provided publicly on Kaggle, by UC Irvine. In this data set, we are only investigating on attributes that contributes to the diagnosis of tumors. Finally, we are cleaning if any data points are null or not.
+
+```{r loading data}
+# Loading data and shows their attribute.
+cancer <- read.csv("data.csv")
+
+# exclude columns id and X since they are not attributes of determining cancer  
+cancer <- select(cancer, -c(id, X))
+
+# Check if data has any null values in any columns we are searching for.
+sum(is.na(cancer))
+# No null Value, we are good to process
+
+# Summary on the data set
+str(cancer)
+```
+
+## MODIFYING THE DATA SET
+Since the **diagnosis** stores the value as **M** and **B**, we are changing these values into **1** and **0** respectively.
+
+``` {r changing diagnosis value}
+diagnosis = recode_factor(cancer$diagnosis, 'M' = '1', 'B' = '0')
+cancer$diagnosis = diagnosis
+
+# Data frame after being modified
+head(cancer)
+```
+
+## BUILDING MODEL
+We are building our model by distributing our data set into 80% training set, 20% testing set, and the training set for cross validation (CV). Of course, they will be randomly distributed to make the model least biased as possible.
+
+```{r Spliting data into subsets}
+#set random seed number to get reproducible model
+set.seed(13)
+
+# Building subsets
+TrainingIndex <- createDataPartition(cancer$diagnosis, p = 0.8, list = FALSE)
+trainingSet <- cancer[TrainingIndex,] #80% random data points
+testingSet <- cancer[-TrainingIndex,] #the rest 20%
+
+#Check if the TrainingIndex is randomly chosen
+head(TrainingIndex, 10) # looks good
+```
+
+## BUILDING THE MODEL USING SUPPORT VECTOR MACHINE (SVM)
+In this step, we are utilizing the support vector machine algorithm with polynomial kernel. SVM helps to create a support vector classifier that separates the **B** and **M** values, while the polynomial kernel helps to alleviate the overlapping data points that can not be easily separated by a linear kernel.
+```{r Building model}
+# Our training model
+Model <- train(diagnosis ~ ., data = trainingSet,
+               method = "svmPoly",
+               preProcess = c("scale","center"),
+               trControl = trainControl(method = "none"),
+               tuneGrid = data.frame(degree= 1, scale = 1, C = 1))
+
+# Our CV model
+cvModel <- train(diagnosis ~ ., data = trainingSet,
+               method = "svmPoly", 
+               preProcess = c("scale","center"),
+               trControl = trainControl(method = "none", number = 25), # 25 iterations
+               tuneGrid = data.frame(degree= 1, scale = 1, C = 1))
+```
+
+## APPLY MODEL FOR PREDICTION
+We are applying **predict** function using the trained model to predict output on our subsets.
+In this case, we are using the **leave-one-out** method. This step helps to reduce overfitting on our model.
+```{r Prediction}
+Model.training <- predict(Model,trainingSet) # Apply model to predict trainingSet
+Model.testing <- predict(Model, testingSet) # Apply model to predict testingSet
+Model.cv <- predict(cvModel, trainingSet) # Cross Validation
+```
+
+## MODEL PERFORMANCE- Confusion Matrix and Statistics
+In this step, we are checking if our training model is reliable or not, by using the confusion matrix. This will provides information such as accuracy rate, which, however, does not need to be exact for a classification model to be trustworthy.
+```{r Confusion and Statistic}
+# Print out confusion matrix of three models we are investigating on
+trainingConfusion <- confusionMatrix(Model.training, trainingSet$diagnosis)
+testConfusion <- confusionMatrix(Model.testing, testingSet$diagnosis)
+cvConfusion <- confusionMatrix(Model.cv, trainingSet$diagnosis)
+```
+
+Statistic on the training data set using training model:
+```{r}
+print(trainingConfusion)
+```
+
+Statistic on the test data set using training model:
+```{r}
+print(testConfusion)
+```
+
+Cross-Validation on the training model
+```{r}
+print(cvConfusion)
+```
+
+## COMMENTS ON OUR CLASSIFICATION MODEL
+Personally speaking, I think our model is well trained. We achieved 98% correct on training model and its cross validation. For predicting "unfed" data, we achieve 96% accuracy, which is an acceptable rate.
+
+## DETERMINING TWO IMPORTANT FEATURES FOR DIAGNOSIS
+As being said in the introduction, we are trying to find two most inportant attributes that contribute to our prediction. We are using the **varImp** function, which would return a detailed comparison.
+```{r Importance }
+Importance <- varImp(Model)
+plot(Importance, col = "turquoise")
+```
+
+Our model suggests that **perimeter_worst** and **area_worst** as the two most important attributes in our studying
+
+## DETERMINING perimeter_worst, area_worst AND diagnosis RELATIONSHIP  
+We are using **plotly** to have a better view about the distribution of tumor diagnosis base on their two important attribute.
+
+* IN 3D view:
+``` {r 3D graph, warning = FALSE}
+# Set up the plot
+plot_ly(x = cancer$perimeter_worst, y =cancer$area_worst, z = cancer$diagnosis,
+      type = "scatter3d", mode = "markers",
+      color = as.factor(cancer$diagnosis), marker = list(size=2)) 
+```
+
+* In 2D view: 
+``` {r 2D, warning = FALSE}
+rad <- ggplot(cancer, aes(x= perimeter_worst, y = area_worst)) +
+  geom_point(alpha = 1/2, aes(color = diagnosis)) + 
+  ggtitle(label = "Perimeter Worst, Area Worst and Diagnosis") +
+  theme_minimal()
+print(rad)
+```
+
+## CONCLUSION
+* It is obvious to conclude from the graph that Malignant tumor has a wider interval than Benign one. The larger values tumors are in both attribute, the more likely they are diagnosed to be Malignant
+* The largest **B** tumor in both attributes, (perimeter, area) is (127.1, 1210), while the smallest **M** tumor can be as small as (85.1, 553.6).
+
+## DATA SET SOURCE
+This data set is publicized online on Kaggle, and is subjected to copyrights. All rights reserved to the owners. https://www.kaggle.com/datasets/uciml/breast-cancer-wisconsin-data
